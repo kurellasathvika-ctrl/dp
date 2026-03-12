@@ -37,24 +37,29 @@ def get_pdb_info(pdb_id):
 
 @st.cache_resource
 def ensure_fpocket():
-    """Compiles fpocket binary if it doesn't exist and sets permissions."""
-    fpocket_bin = os.path.join(BASE_DIR, "fpocket", "bin", "fpocket")
-    fpocket_dir = os.path.join(BASE_DIR, "fpocket")
+    """Compiles fpocket binary if it doesn't exist."""
+    # Use absolute path discovery
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    fpocket_dir = os.path.join(current_dir, "fpocket")
+    fpocket_bin = os.path.join(fpocket_dir, "bin", "fpocket")
     
     if not os.path.exists(fpocket_bin):
-        with st.status("🛠️ Initializing fpocket engine (First-time setup)...") as status:
+        # Double check the directory exists before trying to 'make'
+        if not os.path.exists(fpocket_dir):
+            st.error(f"❌ Error: 'fpocket' directory not found at {fpocket_dir}. Did you push it to GitHub?")
+            return None
+
+        with st.status("🛠️ Compiling fpocket engine for Streamlit Cloud...") as status:
             try:
-                # 1. Clean previous failed attempts
+                # Compile from source
                 subprocess.run(["make", "clean"], cwd=fpocket_dir, capture_output=True)
-                # 2. Compile
                 subprocess.run(["make"], cwd=fpocket_dir, check=True, capture_output=True)
                 
                 if os.path.exists(fpocket_bin):
-                    # 3. SET PERMISSIONS
                     os.chmod(fpocket_bin, 0o755)
-                    status.update(label="✅ Engine ready!", state="complete")
+                    status.update(label="✅ Engine compiled successfully!", state="complete")
                 else:
-                    st.error("❌ Binary not found after compilation.")
+                    st.error("❌ 'make' finished but binary was not created.")
             except subprocess.CalledProcessError as e:
                 st.error(f"❌ Compilation failed: {e.stderr.decode()}")
     
