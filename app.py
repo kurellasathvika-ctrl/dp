@@ -126,7 +126,7 @@ def load_assets():
     return predictor, tokenizer, model, device
 
 # Initialize Assets
-predictor, tokenizer, esm_model, device = load_assets(
+predictor, tokenizer, esm_model, device = load_assets()
 
 # --- THE CONTINUOUS SWARM TRANSITION ---
 def chemistry_swarm_continuous():
