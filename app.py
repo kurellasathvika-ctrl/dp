@@ -14,17 +14,30 @@ from stmol import showmol
 import py3Dmol
 
 # --- CONFIG & PATH FIX ---
-# This ensures the app finds files whether on Colab or Streamlit Cloud
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_DIR = "AutogluonModels/DeepPocket_Model/ag-20260214_165816" # Match your GitHub folder
+MODEL_DIR = "AutogluonModels/DeepPocket_Model/ag-20260214_165816" 
 MODEL_PATH = os.path.join(BASE_DIR, MODEL_DIR)
 ESM_MODEL_NAME = "facebook/esm2_t33_650M_UR50D"
-FPOCKET_EXE = os.path.join(BASE_DIR, "fpocket/bin/fpocket")
 
-# --- AUTO-COMPILE FPOCKET ---
+# --- 1. CORE UTILITY FUNCTIONS (Must be defined first) ---
+
+@st.cache_data
+def get_pdb_info(pdb_id):
+    """Fetches protein metadata from RCSB PDB."""
+    try:
+        url = f"https://data.rcsb.org/rest/v1/core/entry/{pdb_id.upper()}"
+        response = requests.get(url).json()
+        title = response.get('struct', {}).get('title', 'Bio-Structure')
+        entity_url = f"https://data.rcsb.org/rest/v1/core/polymer_entity/{pdb_id.upper()}/1"
+        ent_res = requests.get(entity_url).json()
+        organism = ent_res.get('rcsb_entity_source_organism', [{}])[0].get('scientific_name', 'Nature')
+        return title, organism
+    except:
+        return "Custom Protein", "Biological Source"
+
 @st.cache_resource
 def ensure_fpocket():
-    # Use absolute path to ensure we are in the right place
+    """Compiles fpocket binary if it doesn't exist and sets permissions."""
     fpocket_bin = os.path.join(BASE_DIR, "fpocket", "bin", "fpocket")
     fpocket_dir = os.path.join(BASE_DIR, "fpocket")
     
@@ -34,10 +47,10 @@ def ensure_fpocket():
                 # 1. Clean previous failed attempts
                 subprocess.run(["make", "clean"], cwd=fpocket_dir, capture_output=True)
                 # 2. Compile
-                result = subprocess.run(["make"], cwd=fpocket_dir, check=True, capture_output=True)
+                subprocess.run(["make"], cwd=fpocket_dir, check=True, capture_output=True)
                 
                 if os.path.exists(fpocket_bin):
-                    # 3. SET PERMISSIONS (Critical for Cloud)
+                    # 3. SET PERMISSIONS
                     os.chmod(fpocket_bin, 0o755)
                     status.update(label="✅ Engine ready!", state="complete")
                 else:
@@ -47,58 +60,38 @@ def ensure_fpocket():
     
     return fpocket_bin
 
-# --- ASSET LOADING ---
-@st.cache_resource
-def load_assets():
-    # Call compile check first
-    ensure_fpocket()
-    
-    predictor = TabularPredictor.load(MODEL_PATH)
-    tokenizer = AutoTokenizer.from_pretrained(ESM_MODEL_NAME)
-    model = EsmModel.from_pretrained(ESM_MODEL_NAME)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device).eval()
-    return predictor, tokenizer, model, device
-
-predictor, tokenizer, esm_model, device = load_assets()
-
-# --- BIOLOGY ENGINE ---
 def predict_pockets():
-    # Get the valid path
+    """Runs the fpocket engine and prepares features for the ML model."""
     exe_path = ensure_fpocket()
-    
-    # Define working paths clearly
     pdb_path = os.path.join(BASE_DIR, "input.pdb")
     output_folder = os.path.join(BASE_DIR, "input_out")
     
-    # Cleanup old runs
     if os.path.exists(output_folder):
         subprocess.run(["rm", "-rf", output_folder])
     
-    # Run fpocket
-    # We use cwd=BASE_DIR to ensure input.pdb is found
-    process = subprocess.run([exe_path, "-f", pdb_path], cwd=BASE_DIR, capture_output=True)
+    # Run fpocket binary
+    subprocess.run([exe_path, "-f", pdb_path], cwd=BASE_DIR, capture_output=True)
     
-    # Path to the actual pocket files
     out_dir = os.path.join(BASE_DIR, "input_out", "pockets")
-    
     if not os.path.exists(out_dir):
         st.error("fpocket failed to generate pockets. Check PDB format.")
         return None
-    # ... rest of your function remains the same ...
-    if not os.path.exists(out_dir): return None
 
+    # Parse PDB for Sequence & ESM Embeddings
     parser = PDB.PDBParser(QUIET=True)
-    structure = parser.get_structure('protein', 'input.pdb')
+    structure = parser.get_structure('protein', pdb_path)
     ppb = PDB.PPBuilder()
     sequence = "".join([str(pp.get_sequence()) for pp in ppb.build_peptides(structure)])
+    
     inputs = tokenizer(sequence, return_tensors="pt", truncation=True, max_length=1024).to(device)
     with torch.no_grad():
-        full_matrix = esm_model(**inputs).last_hidden_state[0, 1:-1, :].cpu().numpy()
+        # Generate ESM embeddings
+        _ = esm_model(**inputs).last_hidden_state[0, 1:-1, :].cpu().numpy()
 
     pocket_data = []
     pocket_geoms = []
     pocket_files = sorted([f for f in os.listdir(out_dir) if f.endswith("_atm.pdb")])
+    
     for p_file in pocket_files:
         path = os.path.join(out_dir, p_file)
         with open(path, 'r') as f:
@@ -109,11 +102,31 @@ def predict_pockets():
             for line in f:
                 if line.startswith("HEADER"):
                     match = re.search(r"HEADER\s+\d+\s+-\s+(.*?)\s*:\s*([\d\.-]+)", line)
-                    if match: features[match.group(1).strip().replace(" ", "_")] = float(match.group(2))
+                    if match: 
+                        features[match.group(1).strip().replace(" ", "_")] = float(match.group(2))
+        
+        # Fill ESM zeros (placeholder for the 1280 features expected by your model)
         esm_dict = {f'esm_{j}': 0 for j in range(1280)}
         pocket_data.append({**features, **esm_dict})
 
     return pd.DataFrame(pocket_data).reindex(columns=predictor.feature_metadata.get_features(), fill_value=0), pocket_geoms
+
+# --- 2. ASSET LOADING (Depends on functions above) ---
+
+@st.cache_resource
+def load_assets():
+    # Ensure binary is ready before loading everything else
+    ensure_fpocket()
+    
+    predictor = TabularPredictor.load(MODEL_PATH)
+    tokenizer = AutoTokenizer.from_pretrained(ESM_MODEL_NAME)
+    model = EsmModel.from_pretrained(ESM_MODEL_NAME)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device).eval()
+    return predictor, tokenizer, model, device
+
+# Initialize Assets
+predictor, tokenizer, esm_model, device = load_assets(
 
 # --- THE CONTINUOUS SWARM TRANSITION ---
 def chemistry_swarm_continuous():
