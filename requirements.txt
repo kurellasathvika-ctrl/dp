@@ -1,0 +1,10 @@
+streamlit
+pandas
+numpy
+torch
+transformers
+autogluon.tabular
+biopython
+stmol
+py3Dmol
+requests
