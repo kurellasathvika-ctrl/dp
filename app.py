@@ -37,31 +37,32 @@ def get_pdb_info(pdb_id):
 
 @st.cache_resource
 def ensure_fpocket():
-    """Compiles fpocket binary if it doesn't exist."""
-    # Use absolute path discovery
+    """Compiles fpocket binary if it doesn't exist and sets permissions."""
+    # Use absolute path discovery to avoid /mount/src/ confusion
     current_dir = os.path.dirname(os.path.abspath(__file__))
     fpocket_dir = os.path.join(current_dir, "fpocket")
     fpocket_bin = os.path.join(fpocket_dir, "bin", "fpocket")
     
     if not os.path.exists(fpocket_bin):
-        # Double check the directory exists before trying to 'make'
         if not os.path.exists(fpocket_dir):
-            st.error(f"❌ Error: 'fpocket' directory not found at {fpocket_dir}. Did you push it to GitHub?")
+            st.error(f"📂 'fpocket' folder not found at {fpocket_dir}. Check your GitHub repo structure!")
             return None
 
-        with st.status("🛠️ Compiling fpocket engine for Streamlit Cloud...") as status:
+        with st.status("🛠️ Compiling fpocket engine for Linux environment...") as status:
             try:
-                # Compile from source
+                # 1. Clean previous local artifacts
                 subprocess.run(["make", "clean"], cwd=fpocket_dir, capture_output=True)
-                subprocess.run(["make"], cwd=fpocket_dir, check=True, capture_output=True)
+                # 2. Compile for the current server architecture
+                result = subprocess.run(["make"], cwd=fpocket_dir, capture_output=True, text=True)
                 
                 if os.path.exists(fpocket_bin):
                     os.chmod(fpocket_bin, 0o755)
-                    status.update(label="✅ Engine compiled successfully!", state="complete")
+                    status.update(label="✅ Engine ready!", state="complete")
                 else:
-                    st.error("❌ 'make' finished but binary was not created.")
-            except subprocess.CalledProcessError as e:
-                st.error(f"❌ Compilation failed: {e.stderr.decode()}")
+                    st.error("❌ Binary missing after 'make'. Check if gcc is installed via packages.txt.")
+                    st.code(result.stderr) # Show the compiler error
+            except Exception as e:
+                st.error(f"❌ Compilation failed: {str(e)}")
     
     return fpocket_bin
 
