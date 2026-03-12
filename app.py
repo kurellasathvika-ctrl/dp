@@ -24,15 +24,28 @@ FPOCKET_EXE = os.path.join(BASE_DIR, "fpocket/bin/fpocket")
 # --- AUTO-COMPILE FPOCKET ---
 @st.cache_resource
 def ensure_fpocket():
-    if not os.path.exists(FPOCKET_EXE):
-        st.info("Compiling fpocket engine... please wait.")
+    # 1. Define the path
+    fpocket_bin = os.path.join(BASE_DIR, "fpocket/bin/fpocket")
+    
+    # 2. Check if it already exists
+    if not os.path.exists(fpocket_bin):
+        st.info("🛠️ Compiling fpocket engine... This takes ~2 minutes.")
         try:
-            # Run 'make' inside the fpocket directory
-            subprocess.run(["make"], cwd=os.path.join(BASE_DIR, "fpocket"), check=True)
-            st.success("fpocket engine ready!")
-        except Exception as e:
-            st.error(f"Failed to compile fpocket: {e}")
-    return FPOCKET_EXE
+            # We run 'make' from the root of the fpocket folder
+            fpocket_dir = os.path.join(BASE_DIR, "fpocket")
+            
+            # Use check=True so it raises an error if compilation fails
+            subprocess.run(["make"], cwd=fpocket_dir, check=True, capture_output=True)
+            
+            # Double check if the file was actually created
+            if os.path.exists(fpocket_bin):
+                st.success("✅ fpocket engine compiled successfully!")
+            else:
+                st.error("❌ Compilation finished but 'bin/fpocket' is missing.")
+        except subprocess.CalledProcessError as e:
+            st.error(f"❌ Compilation failed: {e.stderr.decode()}")
+    
+    return fpocket_bin
 
 # --- ASSET LOADING ---
 @st.cache_resource
