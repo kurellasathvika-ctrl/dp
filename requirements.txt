@@ -3,8 +3,9 @@ pandas
 numpy
 torch
 transformers
-autogluon.tabular
+requests
 biopython
+autogluon.tabular
 stmol
 py3Dmol
-requests
+ipython_genutils
