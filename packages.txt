@@ -1,2 +1,3 @@
-freeglut3-dev
-libglu1-mesa
+gcc
+make
+libc6-dev
