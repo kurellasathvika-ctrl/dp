@@ -24,26 +24,26 @@ FPOCKET_EXE = os.path.join(BASE_DIR, "fpocket/bin/fpocket")
 # --- AUTO-COMPILE FPOCKET ---
 @st.cache_resource
 def ensure_fpocket():
-    # 1. Define the path
-    fpocket_bin = os.path.join(BASE_DIR, "fpocket/bin/fpocket")
+    # Use absolute path to ensure we are in the right place
+    fpocket_bin = os.path.join(BASE_DIR, "fpocket", "bin", "fpocket")
+    fpocket_dir = os.path.join(BASE_DIR, "fpocket")
     
-    # 2. Check if it already exists
     if not os.path.exists(fpocket_bin):
-        st.info("🛠️ Compiling fpocket engine... This takes ~2 minutes.")
-        try:
-            # We run 'make' from the root of the fpocket folder
-            fpocket_dir = os.path.join(BASE_DIR, "fpocket")
-            
-            # Use check=True so it raises an error if compilation fails
-            subprocess.run(["make"], cwd=fpocket_dir, check=True, capture_output=True)
-            
-            # Double check if the file was actually created
-            if os.path.exists(fpocket_bin):
-                st.success("✅ fpocket engine compiled successfully!")
-            else:
-                st.error("❌ Compilation finished but 'bin/fpocket' is missing.")
-        except subprocess.CalledProcessError as e:
-            st.error(f"❌ Compilation failed: {e.stderr.decode()}")
+        with st.status("🛠️ Initializing fpocket engine (First-time setup)...") as status:
+            try:
+                # 1. Clean previous failed attempts
+                subprocess.run(["make", "clean"], cwd=fpocket_dir, capture_output=True)
+                # 2. Compile
+                result = subprocess.run(["make"], cwd=fpocket_dir, check=True, capture_output=True)
+                
+                if os.path.exists(fpocket_bin):
+                    # 3. SET PERMISSIONS (Critical for Cloud)
+                    os.chmod(fpocket_bin, 0o755)
+                    status.update(label="✅ Engine ready!", state="complete")
+                else:
+                    st.error("❌ Binary not found after compilation.")
+            except subprocess.CalledProcessError as e:
+                st.error(f"❌ Compilation failed: {e.stderr.decode()}")
     
     return fpocket_bin
 
@@ -63,25 +63,28 @@ def load_assets():
 predictor, tokenizer, esm_model, device = load_assets()
 
 # --- BIOLOGY ENGINE ---
-def get_pdb_info(pdb_id):
-    try:
-        url = f"https://data.rcsb.org/rest/v1/core/entry/{pdb_id.upper()}"
-        response = requests.get(url).json()
-        title = response.get('struct', {}).get('title', 'Bio-Structure')
-        entity_url = f"https://data.rcsb.org/rest/v1/core/polymer_entity/{pdb_id.upper()}/1"
-        ent_res = requests.get(entity_url).json()
-        organism = ent_res.get('rcsb_entity_source_organism', [{}])[0].get('scientific_name', 'Nature')
-        return title, organism
-    except:
-        return "Custom Protein", "Biological Source"
-
 def predict_pockets():
-    if os.path.exists("input_out"): subprocess.run(["rm", "-rf", "input_out"])
+    # Get the valid path
+    exe_path = ensure_fpocket()
     
-    # Use the dynamic path to the binary
-    subprocess.run([FPOCKET_EXE, "-f", "input.pdb"])
+    # Define working paths clearly
+    pdb_path = os.path.join(BASE_DIR, "input.pdb")
+    output_folder = os.path.join(BASE_DIR, "input_out")
     
-    out_dir = "input_out/pockets"
+    # Cleanup old runs
+    if os.path.exists(output_folder):
+        subprocess.run(["rm", "-rf", output_folder])
+    
+    # Run fpocket
+    # We use cwd=BASE_DIR to ensure input.pdb is found
+    process = subprocess.run([exe_path, "-f", pdb_path], cwd=BASE_DIR, capture_output=True)
+    
+    # Path to the actual pocket files
+    out_dir = os.path.join(BASE_DIR, "input_out", "pockets")
+    
+    if not os.path.exists(out_dir):
+        st.error("fpocket failed to generate pockets. Check PDB format.")
+        return None
     # ... rest of your function remains the same ...
     if not os.path.exists(out_dir): return None
 
