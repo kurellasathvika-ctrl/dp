@@ -13,12 +13,33 @@ from autogluon.tabular import TabularPredictor
 from stmol import showmol
 import py3Dmol
 
-# --- CONFIG ---
-MODEL_PATH = "/content/AutogluonModels/ag-20260214_165816"
+# --- CONFIG & PATH FIX ---
+# This ensures the app finds files whether on Colab or Streamlit Cloud
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_DIR = "AutogluonModels/DeepPocket_Model/ag-20260214_165816" # Match your GitHub folder
+MODEL_PATH = os.path.join(BASE_DIR, MODEL_DIR)
 ESM_MODEL_NAME = "facebook/esm2_t33_650M_UR50D"
+FPOCKET_EXE = os.path.join(BASE_DIR, "fpocket/bin/fpocket")
 
+# --- AUTO-COMPILE FPOCKET ---
+@st.cache_resource
+def ensure_fpocket():
+    if not os.path.exists(FPOCKET_EXE):
+        st.info("Compiling fpocket engine... please wait.")
+        try:
+            # Run 'make' inside the fpocket directory
+            subprocess.run(["make"], cwd=os.path.join(BASE_DIR, "fpocket"), check=True)
+            st.success("fpocket engine ready!")
+        except Exception as e:
+            st.error(f"Failed to compile fpocket: {e}")
+    return FPOCKET_EXE
+
+# --- ASSET LOADING ---
 @st.cache_resource
 def load_assets():
+    # Call compile check first
+    ensure_fpocket()
+    
     predictor = TabularPredictor.load(MODEL_PATH)
     tokenizer = AutoTokenizer.from_pretrained(ESM_MODEL_NAME)
     model = EsmModel.from_pretrained(ESM_MODEL_NAME)
@@ -43,8 +64,12 @@ def get_pdb_info(pdb_id):
 
 def predict_pockets():
     if os.path.exists("input_out"): subprocess.run(["rm", "-rf", "input_out"])
-    subprocess.run(["/content/fpocket/bin/fpocket", "-f", "input.pdb"])
+    
+    # Use the dynamic path to the binary
+    subprocess.run([FPOCKET_EXE, "-f", "input.pdb"])
+    
     out_dir = "input_out/pockets"
+    # ... rest of your function remains the same ...
     if not os.path.exists(out_dir): return None
 
     parser = PDB.PDBParser(QUIET=True)
